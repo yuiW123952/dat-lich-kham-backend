@@ -12,7 +12,6 @@ router.post('/', async (req, res) => {
   try {
     await conn.beginTransaction();
 
-    // Kiểm tra profile thuộc user đang đăng nhập
     const [[profileCheck]] = await conn.query(
       'SELECT id FROM patient_profiles WHERE id=? AND user_id=?',
       [profile_id, req.user.id]
@@ -22,55 +21,50 @@ router.post('/', async (req, res) => {
       return res.json({ success: false, message: 'Hồ sơ không hợp lệ' });
     }
 
-    // Lấy thông tin slot gốc để tìm cùng khung giờ
-const [[refSch]] = await conn.query(
-  'SELECT department_id, date, start_time, end_time FROM schedules WHERE id = ?',
-  [schedule_id]
-);
-if (!refSch) { await conn.rollback(); return res.json({ success: false, message: 'Không tìm thấy lịch' }); }
+    const [[refSch]] = await conn.query(
+      'SELECT department_id, date, start_time, end_time FROM schedules WHERE id = ?',
+      [schedule_id]
+    );
+    if (!refSch) { await conn.rollback(); return res.json({ success: false, message: 'Không tìm thấy lịch' }); }
 
-// Tìm tất cả schedules cùng khoa + ngày + giờ, lock lại
-const [allSchs] = await conn.query(`
-  SELECT s.id, s.max_patients,
-         (SELECT COUNT(*) FROM appointments WHERE schedule_id = s.id AND status != 'cancelled') AS booked
-  FROM schedules s
-  WHERE s.department_id = ? AND s.date = ? AND s.start_time = ? AND s.end_time = ?
-  FOR UPDATE`, [refSch.department_id, refSch.date, refSch.start_time, refSch.end_time]);
+    const [allSchs] = await conn.query(`
+      SELECT s.id, s.max_patients,
+             (SELECT COUNT(*) FROM appointments WHERE schedule_id = s.id AND status != 'cancelled') AS booked
+      FROM schedules s
+      WHERE s.department_id = ? AND s.date = ? AND s.start_time = ? AND s.end_time = ?
+      FOR UPDATE`, [refSch.department_id, refSch.date, refSch.start_time, refSch.end_time]);
 
-// Kiểm tra còn chỗ không (tổng)
-const totalBooked = allSchs.reduce((sum, s) => sum + Number(s.booked), 0);
-const totalMax    = allSchs.reduce((sum, s) => sum + Number(s.max_patients), 0);
-if (totalBooked >= totalMax) {
-  await conn.rollback();
-  return res.json({ success: false, message: 'Lịch đã đầy, vui lòng chọn lịch khác' });
-}
+    const totalBooked = allSchs.reduce((sum, s) => sum + Number(s.booked), 0);
+    const totalMax    = allSchs.reduce((sum, s) => sum + Number(s.max_patients), 0);
+    if (totalBooked >= totalMax) {
+      await conn.rollback();
+      return res.json({ success: false, message: 'Lịch đã đầy, vui lòng chọn lịch khác' });
+    }
 
-// Chọn bác sĩ còn nhiều chỗ trống nhất
-const bestSch = allSchs
-  .filter(s => s.booked < s.max_patients)
-  .sort((a, b) => (a.max_patients - a.booked) < (b.max_patients - b.booked) ? 1 : -1)[0];
+    const bestSch = allSchs
+      .filter(s => s.booked < s.max_patients)
+      .sort((a, b) => (a.max_patients - a.booked) < (b.max_patients - b.booked) ? 1 : -1)[0];
 
-const sch = { max_patients: bestSch.max_patients, booked: bestSch.booked };
-const actual_schedule_id = bestSch.id;
+    const sch = { max_patients: bestSch.max_patients, booked: bestSch.booked };
+    const actual_schedule_id = bestSch.id;
 
-    // Kiểm tra trùng lịch (theo toàn bộ khung giờ, không chỉ 1 schedule)
-const [dupCheck] = await conn.query(`
-  SELECT a.id FROM appointments a
-  JOIN schedules s ON a.schedule_id = s.id
-  WHERE a.profile_id = ?
-    AND s.department_id = ?
-    AND s.date = ?
-    AND s.start_time = ?
-    AND s.end_time = ?
-    AND a.status != 'cancelled'`,
-  [profile_id, refSch.department_id, refSch.date, refSch.start_time, refSch.end_time]);
-if (dupCheck.length) { await conn.rollback(); return res.json({ success: false, message: 'Hồ sơ này đã có lịch khám trong buổi này' }); }
+    const [dupCheck] = await conn.query(`
+      SELECT a.id FROM appointments a
+      JOIN schedules s ON a.schedule_id = s.id
+      WHERE a.profile_id = ?
+        AND s.department_id = ?
+        AND s.date = ?
+        AND s.start_time = ?
+        AND s.end_time = ?
+        AND a.status != 'cancelled'`,
+      [profile_id, refSch.department_id, refSch.date, refSch.start_time, refSch.end_time]);
+    if (dupCheck.length) { await conn.rollback(); return res.json({ success: false, message: 'Hồ sơ này đã có lịch khám trong buổi này' }); }
 
     const queue_number = sch.booked + 1;
-const [r] = await conn.query(
-  'INSERT INTO appointments (schedule_id, profile_id, queue_number, patient_notes, payment_method) VALUES (?,?,?,?,?)',
-  [actual_schedule_id, profile_id, queue_number, patient_notes || '', payment_method || 'cash']
-);
+    const [r] = await conn.query(
+      'INSERT INTO appointments (schedule_id, profile_id, queue_number, patient_notes, payment_method) VALUES (?,?,?,?,?)',
+      [actual_schedule_id, profile_id, queue_number, patient_notes || '', payment_method || 'cash']
+    );
     await conn.commit();
     res.json({ success: true, data: { id: r.insertId, queueNumber: queue_number } });
   } catch (e) {
@@ -89,7 +83,6 @@ router.get('/my', async (req, res) => {
     if (!profiles.length) return res.json({ success: true, data: [] });
     const profileIds = profiles.map(p => p.id);
 
-    // Tự động chuyển các lịch waiting/in_progress của ngày đã qua → done
     await db.query(`
       UPDATE appointments a
       JOIN schedules s ON a.schedule_id = s.id
@@ -107,7 +100,7 @@ router.get('/my', async (req, res) => {
       SELECT a.*, pp.full_name AS patient_name,
              u_doc.full_name AS doctor_name, dep.name AS department_name,
              s.date, s.start_time, s.end_time, s.current_queue,
-             mr.diagnosis, mr.prescription, mr.notes AS treatment_notes
+             mr.diagnosis, mr.notes AS treatment_notes
       FROM appointments a
       JOIN schedules s ON a.schedule_id = s.id
       JOIN doctors d ON s.doctor_id = d.id
@@ -118,6 +111,30 @@ router.get('/my', async (req, res) => {
       WHERE ${where}
       ORDER BY s.date DESC, a.queue_number`, params);
     res.json({ success: true, data: rows });
+  } catch (e) { res.json({ success: false, message: 'Lỗi server' }); }
+});
+
+// GET /api/appointments/:id/record - bệnh nhân xem bệnh án + đơn thuốc của mình
+router.get('/:id/record', async (req, res) => {
+  try {
+    // Kiểm tra appointment thuộc profile của user đang đăng nhập
+    const [[appt]] = await db.query(`
+      SELECT a.id FROM appointments a
+      JOIN patient_profiles pp ON a.profile_id = pp.id
+      WHERE a.id = ? AND pp.user_id = ?`, [req.params.id, req.user.id]);
+    if (!appt) return res.json({ success: false, message: 'Không tìm thấy lịch hẹn' });
+
+    const [[record]] = await db.query(
+      'SELECT * FROM medical_records WHERE appointment_id = ?', [req.params.id]
+    );
+    if (!record) return res.json({ success: false, message: 'Chưa có bệnh án' });
+
+    const [medicines] = await db.query(
+      'SELECT * FROM prescription_items WHERE medical_record_id = ? ORDER BY id',
+      [record.id]
+    );
+
+    res.json({ success: true, data: { ...record, medicines } });
   } catch (e) { res.json({ success: false, message: 'Lỗi server' }); }
 });
 
@@ -133,12 +150,10 @@ router.put('/:id/cancel', async (req, res) => {
     if (rows[0].status === 'cancelled') return res.json({ success: false, message: 'Lịch đã được hủy trước đó' });
     if (rows[0].status === 'done') return res.json({ success: false, message: 'Lịch đã khám xong, không thể hủy' });
 
-    // Cho phép hủy nếu còn trước giờ khám ít nhất 5 tiếng
     const apptDate = new Date(rows[0].date);
     const [h, m] = rows[0].start_time.split(':').map(Number);
     apptDate.setHours(h, m, 0, 0);
-    const now = new Date();
-    const diffHours = (apptDate - now) / (1000 * 60 * 60);
+    const diffHours = (apptDate - new Date()) / (1000 * 60 * 60);
     if (diffHours < 5) return res.json({ success: false, message: 'Chỉ được hủy trước giờ khám ít nhất 5 tiếng!' });
 
     await db.query(`UPDATE appointments SET status='cancelled' WHERE id=?`, [req.params.id]);
