@@ -139,11 +139,21 @@ router.put('/profiles/:id', auth, async (req, res) => {
 });
 
 // DELETE /api/auth/profiles/:id
+// DELETE /api/auth/profiles/:id
 router.delete('/profiles/:id', auth, async (req, res) => {
   try {
     const [[profile]] = await db.query('SELECT id FROM patient_profiles WHERE id=? AND user_id=?', [req.params.id, req.user.id]);
     if (!profile) return res.json({ success: false, message: 'Không tìm thấy hồ sơ' });
+
+    const [appts] = await db.query('SELECT id FROM appointments WHERE profile_id=?', [req.params.id]);
+    for (const appt of appts) {
+      await db.query('DELETE FROM prescription_items WHERE medical_record_id IN (SELECT id FROM medical_records WHERE appointment_id=?)', [appt.id]);
+      await db.query('DELETE FROM reviews WHERE appointment_id=?', [appt.id]);
+      await db.query('DELETE FROM medical_records WHERE appointment_id=?', [appt.id]);
+    }
+    await db.query('DELETE FROM appointments WHERE profile_id=?', [req.params.id]);
     await db.query('DELETE FROM patient_profiles WHERE id=? AND user_id=?', [req.params.id, req.user.id]);
+
     res.json({ success: true });
   } catch (e) { res.json({ success: false, message: 'Lỗi server' }); }
 });
