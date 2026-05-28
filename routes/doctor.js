@@ -7,7 +7,7 @@ const { sendPush } = require('../helpers/push');
 
 router.use(auth, requireRole('doctor'));
 
-// GET /api/doctor/me - thông tin bác sĩ đang đăng nhập
+// GET /api/doctor/me
 router.get('/me', async (req, res) => {
   try {
     const [rows] = await db.query(`
@@ -22,7 +22,7 @@ router.get('/me', async (req, res) => {
   } catch (e) { res.json({ success: false, message: 'Lỗi server' }); }
 });
 
-// GET /api/doctor/queue?date=YYYY-MM-DD - danh sách bệnh nhân theo ngày
+// GET /api/doctor/queue?date=YYYY-MM-DD
 router.get('/queue', async (req, res) => {
   try {
     const date = req.query.date || new Date().toISOString().slice(0, 10);
@@ -44,7 +44,6 @@ router.get('/queue', async (req, res) => {
       WHERE s.doctor_id = ? AND s.date = ? AND a.status != 'cancelled'
       ORDER BY a.queue_number`, [doctor_id, date]);
 
-    // Lấy số đang gọi từ schedule
     const [sch] = await db.query('SELECT current_queue FROM schedules WHERE doctor_id=? AND date=? LIMIT 1', [doctor_id, date]);
     const current_queue = sch.length ? sch[0].current_queue : 0;
 
@@ -52,7 +51,7 @@ router.get('/queue', async (req, res) => {
   } catch (e) { res.json({ success: false, message: 'Lỗi server' }); }
 });
 
-// PUT /api/doctor/appointments/:id/call - gọi bệnh nhân vào (in_progress)
+// PUT /api/doctor/appointments/:id/call
 router.put('/appointments/:id/call', async (req, res) => {
   try {
     const [appts] = await db.query(`
@@ -69,7 +68,6 @@ router.put('/appointments/:id/call', async (req, res) => {
     await db.query(`UPDATE appointments SET status='in_progress' WHERE id=?`, [appt.id]);
     await db.query(`UPDATE schedules SET current_queue=? WHERE id=?`, [appt.queue_number, appt.schedule_id]);
 
-    // Gửi push notification cho bệnh nhân
     await sendPush(
       appt.expo_push_token,
       '🔔 Đến lượt của bạn!',
@@ -81,7 +79,7 @@ router.put('/appointments/:id/call', async (req, res) => {
   } catch (e) { res.json({ success: false, message: 'Lỗi server' }); }
 });
 
-// PUT /api/doctor/appointments/:id/done - hoàn thành khám
+// PUT /api/doctor/appointments/:id/done
 router.put('/appointments/:id/done', async (req, res) => {
   try {
     await db.query(`UPDATE appointments SET status='done' WHERE id=?`, [req.params.id]);
@@ -89,33 +87,76 @@ router.put('/appointments/:id/done', async (req, res) => {
   } catch (e) { res.json({ success: false, message: 'Lỗi server' }); }
 });
 
-// POST /api/doctor/appointments/:id/record - nhập bệnh án
+// POST /api/doctor/appointments/:id/record - nhập bệnh án + đơn thuốc chi tiết
 router.post('/appointments/:id/record', async (req, res) => {
-  const { diagnosis, prescription, notes } = req.body;
+  const { diagnosis, notes, medicines } = req.body;
+  console.log('medicines:', JSON.stringify(medicines));
+  // medicines = [{ medicine_name, quantity, days, dose_sang, dose_trua, dose_chieu, dose_toi, timing, timing_minutes, note }]
+  const conn = await db.getConnection();
   try {
-    const [ex] = await db.query('SELECT id FROM medical_records WHERE appointment_id=?', [req.params.id]);
+    await conn.beginTransaction();
+
+    let recordId;
+    const [ex] = await conn.query('SELECT id FROM medical_records WHERE appointment_id=?', [req.params.id]);
     if (ex.length) {
-      await db.query(
-        'UPDATE medical_records SET diagnosis=?, prescription=?, notes=? WHERE appointment_id=?',
-        [diagnosis, prescription, notes, req.params.id]
+      recordId = ex[0].id;
+      await conn.query(
+        'UPDATE medical_records SET diagnosis=?, notes=? WHERE id=?',
+        [diagnosis, notes, recordId]
       );
+      // Xóa đơn thuốc cũ để insert lại
+      await conn.query('DELETE FROM prescription_items WHERE medical_record_id=?', [recordId]);
     } else {
-      await db.query(
-        'INSERT INTO medical_records (appointment_id, diagnosis, prescription, notes) VALUES (?,?,?,?)',
-        [req.params.id, diagnosis, prescription, notes]
+      const [ins] = await conn.query(
+        'INSERT INTO medical_records (appointment_id, diagnosis, notes) VALUES (?,?,?)',
+        [req.params.id, diagnosis, notes]
       );
+      recordId = ins.insertId;
     }
-    // Tự động mark done
-    await db.query(`UPDATE appointments SET status='done' WHERE id=?`, [req.params.id]);
+
+    // Insert từng dòng thuốc
+    if (Array.isArray(medicines) && medicines.length > 0) {
+      for (const m of medicines) {
+        if (!m.medicine_name || !m.medicine_name.trim()) continue;
+        await conn.query(
+          `INSERT INTO prescription_items
+            (medical_record_id, medicine_name, quantity, days,
+             dose_sang, dose_trua, dose_chieu, dose_toi,
+             timing, timing_minutes, note)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+          [
+            recordId,
+            m.medicine_name.trim(),
+            m.quantity || '',
+            m.days || 1,
+            m.dose_sang || 0,
+            m.dose_trua || 0,
+            m.dose_chieu || 0,
+            m.dose_toi || 0,
+            m.timing || 'sau_an',
+            m.timing_minutes || 30,
+            m.note || ''
+          ]
+        );
+      }
+    }
+
+    await conn.query(`UPDATE appointments SET status='done' WHERE id=?`, [req.params.id]);
+    await conn.commit();
     res.json({ success: true, message: 'Lưu bệnh án thành công' });
-  } catch (e) { res.json({ success: false, message: 'Lỗi server' }); }
+  } catch (e) {
+    await conn.rollback();
+    res.json({ success: false, message: 'Lỗi server' });
+  } finally {
+    conn.release();
+  }
 });
 
-// GET /api/doctor/appointments/:id/record - xem bệnh án
+// GET /api/doctor/appointments/:id/record - xem bệnh án + đơn thuốc chi tiết
 router.get('/appointments/:id/record', async (req, res) => {
   try {
     const [rows] = await db.query(`
-      SELECT mr.*, pp.full_name AS patient_name, pp.date_of_birth, pp.insurance_number,
+      SELECT mr.*, pp.full_name AS patient_name, pp.date_of_birth, pp.gender, pp.insurance_number,
              s.date, s.start_time, u_doc.full_name AS doctor_name, dep.name AS department_name
       FROM medical_records mr
       JOIN appointments a ON mr.appointment_id = a.id
@@ -126,18 +167,25 @@ router.get('/appointments/:id/record', async (req, res) => {
       JOIN departments dep ON s.department_id = dep.id
       WHERE mr.appointment_id = ?`, [req.params.id]);
     if (!rows.length) return res.json({ success: false, message: 'Chưa có bệnh án' });
-    res.json({ success: true, data: rows[0] });
+
+    // Lấy đơn thuốc chi tiết
+    const [medicines] = await db.query(
+      'SELECT * FROM prescription_items WHERE medical_record_id=? ORDER BY id',
+      [rows[0].id]
+    );
+
+    res.json({ success: true, data: { ...rows[0], medicines } });
   } catch (e) { res.json({ success: false, message: 'Lỗi server' }); }
 });
 
-// GET /api/doctor/patient-history/:profileId - lịch sử khám cũ của bệnh nhân
+// GET /api/doctor/patient-history/:profileId
 router.get('/patient-history/:profileId', async (req, res) => {
   try {
     const exclude = req.query.exclude || 0;
     const [rows] = await db.query(`
       SELECT a.id, s.date, dep.name AS department_name,
              u_doc.full_name AS doctor_name,
-             mr.diagnosis, mr.prescription, mr.notes, mr.created_at
+             mr.id AS record_id, mr.diagnosis, mr.notes, mr.created_at
       FROM appointments a
       JOIN schedules s ON a.schedule_id = s.id
       JOIN doctors d ON s.doctor_id = d.id
@@ -149,6 +197,20 @@ router.get('/patient-history/:profileId', async (req, res) => {
         AND a.id != ?
       ORDER BY s.date DESC, a.id DESC
       LIMIT 10`, [req.params.profileId, exclude]);
+
+    // Lấy đơn thuốc cho mỗi lần khám
+    for (const row of rows) {
+      if (row.record_id) {
+        const [meds] = await db.query(
+          'SELECT * FROM prescription_items WHERE medical_record_id=? ORDER BY id',
+          [row.record_id]
+        );
+        row.medicines = meds;
+      } else {
+        row.medicines = [];
+      }
+    }
+
     res.json({ success: true, data: rows });
   } catch (e) { res.json({ success: false, message: 'Lỗi server' }); }
 });
