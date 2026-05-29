@@ -7,7 +7,7 @@ router.use(auth);
 
 // POST /api/appointments - đặt lịch
 router.post('/', async (req, res) => {
-  const { schedule_id, profile_id, patient_notes, payment_method } = req.body;
+  const { schedule_id, profile_id, patient_notes, payment_method, service_type } = req.body;
   const conn = await db.getConnection();
   try {
     await conn.beginTransaction();
@@ -62,8 +62,8 @@ router.post('/', async (req, res) => {
 
     const queue_number = sch.booked + 1;
     const [r] = await conn.query(
-      'INSERT INTO appointments (schedule_id, profile_id, queue_number, patient_notes, payment_method) VALUES (?,?,?,?,?)',
-      [actual_schedule_id, profile_id, queue_number, patient_notes || '', payment_method || 'cash']
+      'INSERT INTO appointments (schedule_id, profile_id, queue_number, patient_notes, payment_method, service_type) VALUES (?,?,?,?,?,?)',
+      [actual_schedule_id, profile_id, queue_number, patient_notes || '', payment_method || 'cash', service_type || 'dichvu']
     );
     await conn.commit();
     res.json({ success: true, data: { id: r.insertId, queueNumber: queue_number } });
@@ -114,10 +114,9 @@ router.get('/my', async (req, res) => {
   } catch (e) { res.json({ success: false, message: 'Lỗi server' }); }
 });
 
-// GET /api/appointments/:id/record - bệnh nhân xem bệnh án + đơn thuốc của mình
+// GET /api/appointments/:id/record - bệnh nhân xem bệnh án + đơn thuốc
 router.get('/:id/record', async (req, res) => {
   try {
-    // Kiểm tra appointment thuộc profile của user đang đăng nhập
     const [[appt]] = await db.query(`
       SELECT a.id FROM appointments a
       JOIN patient_profiles pp ON a.profile_id = pp.id
@@ -133,8 +132,34 @@ router.get('/:id/record', async (req, res) => {
       'SELECT * FROM prescription_items WHERE medical_record_id = ? ORDER BY id',
       [record.id]
     );
-
     res.json({ success: true, data: { ...record, medicines } });
+  } catch (e) { res.json({ success: false, message: 'Lỗi server' }); }
+});
+
+// PUT /api/appointments/:id/confirm-payment - xác nhận thanh toán (admin/lễ tân)
+router.put('/:id/confirm-payment', async (req, res) => {
+  try {
+    // Chỉ admin mới được xác nhận thanh toán
+    if (req.user.role !== 'admin') {
+      return res.json({ success: false, message: 'Không có quyền thực hiện' });
+    }
+    const [[appt]] = await db.query('SELECT id, status FROM appointments WHERE id=?', [req.params.id]);
+    if (!appt) return res.json({ success: false, message: 'Không tìm thấy lịch hẹn' });
+    if (appt.status === 'cancelled') return res.json({ success: false, message: 'Lịch đã bị hủy' });
+
+    await db.query('UPDATE appointments SET payment_status=? WHERE id=?', ['paid', req.params.id]);
+    res.json({ success: true, message: 'Đã xác nhận thanh toán' });
+  } catch (e) { res.json({ success: false, message: 'Lỗi server' }); }
+});
+
+// PUT /api/appointments/:id/absent - đánh dấu bệnh nhân vắng mặt
+router.put('/:id/absent', async (req, res) => {
+  try {
+    if (req.user.role !== 'doctor') {
+      return res.json({ success: false, message: 'Không có quyền thực hiện' });
+    }
+    await db.query(`UPDATE appointments SET status='absent' WHERE id=?`, [req.params.id]);
+    res.json({ success: true });
   } catch (e) { res.json({ success: false, message: 'Lỗi server' }); }
 });
 
