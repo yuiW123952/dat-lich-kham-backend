@@ -115,14 +115,12 @@ router.get('/my', async (req, res) => {
   } catch (e) { res.json({ success: false, message: 'Lỗi server' }); }
 });
 
-// GET /api/appointments/find-by-cccd - tìm lịch hẹn theo CCCD (cho lễ tân)
+// GET /api/appointments/find-by-cccd
 router.get('/find-by-cccd', async (req, res) => {
   try {
     const { cccd, date } = req.query;
     if (!cccd) return res.json({ success: false, message: 'Vui lòng nhập CCCD' });
-
     const dateFilter = date || new Date().toISOString().slice(0, 10);
-
     const [rows] = await db.query(`
       SELECT a.id, a.queue_number, a.status, a.payment_method, a.payment_status,
              a.service_type, a.checked_in,
@@ -137,22 +135,18 @@ router.get('/find-by-cccd', async (req, res) => {
       JOIN doctors d ON s.doctor_id = d.id
       JOIN users u_doc ON d.user_id = u_doc.id
       JOIN departments dep ON s.department_id = dep.id
-      WHERE pp.cccd = ?
-        AND s.date = ?
-        AND a.status != 'cancelled'
+      WHERE pp.cccd = ? AND s.date = ? AND a.status != 'cancelled'
       ORDER BY a.queue_number`, [cccd, dateFilter]);
-
     if (!rows.length) return res.json({ success: false, message: 'Không tìm thấy lịch hẹn' });
     res.json({ success: true, data: rows });
   } catch (e) { res.json({ success: false, message: 'Lỗi server' }); }
 });
 
-// GET /api/appointments/find-by-id - tìm lịch hẹn theo appointment_id (cho lễ tân quét QR)
+// GET /api/appointments/find-by-id
 router.get('/find-by-id', async (req, res) => {
   try {
     const { id } = req.query;
     if (!id) return res.json({ success: false, message: 'Thiếu ID lịch hẹn' });
-
     const [[row]] = await db.query(`
       SELECT a.id, a.queue_number, a.status, a.payment_method, a.payment_status,
              a.service_type, a.checked_in,
@@ -168,13 +162,12 @@ router.get('/find-by-id', async (req, res) => {
       JOIN users u_doc ON d.user_id = u_doc.id
       JOIN departments dep ON s.department_id = dep.id
       WHERE a.id = ? AND a.status != 'cancelled'`, [id]);
-
     if (!row) return res.json({ success: false, message: 'Không tìm thấy lịch hẹn' });
     res.json({ success: true, data: row });
   } catch (e) { res.json({ success: false, message: 'Lỗi server' }); }
 });
 
-// GET /api/appointments/:id/record - bệnh nhân xem bệnh án + đơn thuốc
+// GET /api/appointments/:id/record
 router.get('/:id/record', async (req, res) => {
   try {
     const [[appt]] = await db.query(`
@@ -182,36 +175,38 @@ router.get('/:id/record', async (req, res) => {
       JOIN patient_profiles pp ON a.profile_id = pp.id
       WHERE a.id = ? AND pp.user_id = ?`, [req.params.id, req.user.id]);
     if (!appt) return res.json({ success: false, message: 'Không tìm thấy lịch hẹn' });
-
-    const [[record]] = await db.query(
-      'SELECT * FROM medical_records WHERE appointment_id = ?', [req.params.id]
-    );
+    const [[record]] = await db.query('SELECT * FROM medical_records WHERE appointment_id = ?', [req.params.id]);
     if (!record) return res.json({ success: false, message: 'Chưa có bệnh án' });
-
-    const [medicines] = await db.query(
-      'SELECT * FROM prescription_items WHERE medical_record_id = ? ORDER BY id',
-      [record.id]
-    );
+    const [medicines] = await db.query('SELECT * FROM prescription_items WHERE medical_record_id = ? ORDER BY id', [record.id]);
     res.json({ success: true, data: { ...record, medicines } });
   } catch (e) { res.json({ success: false, message: 'Lỗi server' }); }
 });
 
-// PUT /api/appointments/:id/confirm-payment - lễ tân xác nhận bệnh nhân đã đến
+// PUT /api/appointments/:id/confirm-payment - bệnh nhân xác nhận đã thanh toán Momo
+// Chỉ set payment_status = paid, KHÔNG set checked_in
 router.put('/:id/confirm-payment', async (req, res) => {
   try {
-    const [[appt]] = await db.query('SELECT id, status, payment_method FROM appointments WHERE id=?', [req.params.id]);
+    const [[appt]] = await db.query('SELECT id, status FROM appointments WHERE id=?', [req.params.id]);
     if (!appt) return res.json({ success: false, message: 'Không tìm thấy lịch hẹn' });
     if (appt.status === 'cancelled') return res.json({ success: false, message: 'Lịch đã bị hủy' });
+    await db.query('UPDATE appointments SET payment_status = "paid" WHERE id=?', [req.params.id]);
+    res.json({ success: true, message: 'Đã xác nhận thanh toán' });
+  } catch (e) { res.json({ success: false, message: 'Lỗi server' }); }
+});
 
-    await db.query(
-      'UPDATE appointments SET checked_in = 1, payment_status = "paid" WHERE id=?',
-      [req.params.id]
-    );
+// PUT /api/appointments/:id/checkin - lễ tân xác nhận bệnh nhân đã đến
+// Set checked_in = 1 + payment_status = paid (thu tiền mặt)
+router.put('/:id/checkin', async (req, res) => {
+  try {
+    const [[appt]] = await db.query('SELECT id, status FROM appointments WHERE id=?', [req.params.id]);
+    if (!appt) return res.json({ success: false, message: 'Không tìm thấy lịch hẹn' });
+    if (appt.status === 'cancelled') return res.json({ success: false, message: 'Lịch đã bị hủy' });
+    await db.query('UPDATE appointments SET checked_in = 1, payment_status = "paid" WHERE id=?', [req.params.id]);
     res.json({ success: true, message: 'Đã xác nhận bệnh nhân đã đến' });
   } catch (e) { res.json({ success: false, message: 'Lỗi server' }); }
 });
 
-// PUT /api/appointments/:id/absent - đánh dấu bệnh nhân vắng mặt
+// PUT /api/appointments/:id/absent
 router.put('/:id/absent', async (req, res) => {
   try {
     await db.query(`UPDATE appointments SET status='absent' WHERE id=?`, [req.params.id]);
@@ -219,17 +214,18 @@ router.put('/:id/absent', async (req, res) => {
   } catch (e) { res.json({ success: false, message: 'Lỗi server' }); }
 });
 
-// PUT /api/appointments/:id/cancel - hủy lịch
+// PUT /api/appointments/:id/cancel
 router.put('/:id/cancel', async (req, res) => {
   try {
     const [rows] = await db.query(`
-      SELECT a.id, a.status, s.date, s.start_time FROM appointments a
+      SELECT a.id, a.status, a.checked_in, s.date, s.start_time FROM appointments a
       JOIN patient_profiles pp ON a.profile_id = pp.id
       JOIN schedules s ON a.schedule_id = s.id
       WHERE a.id = ? AND pp.user_id = ?`, [req.params.id, req.user.id]);
     if (!rows.length) return res.json({ success: false, message: 'Không tìm thấy lịch hẹn' });
     if (rows[0].status === 'cancelled') return res.json({ success: false, message: 'Lịch đã được hủy trước đó' });
     if (rows[0].status === 'done') return res.json({ success: false, message: 'Lịch đã khám xong, không thể hủy' });
+    if (Number(rows[0].checked_in) === 1) return res.json({ success: false, message: 'Đã check-in tại lễ tân, không thể hủy!' });
 
     const apptDate = new Date(rows[0].date);
     const [h, m] = rows[0].start_time.split(':').map(Number);
