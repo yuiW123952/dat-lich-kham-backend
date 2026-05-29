@@ -98,6 +98,7 @@ router.get('/my', async (req, res) => {
 
     const [rows] = await db.query(`
       SELECT a.*, pp.full_name AS patient_name,
+       pp.date_of_birth, pp.gender, pp.cccd, pp.insurance_number,
              u_doc.full_name AS doctor_name, dep.name AS department_name,
              s.date, s.start_time, s.end_time, s.current_queue,
              mr.diagnosis, mr.notes AS treatment_notes
