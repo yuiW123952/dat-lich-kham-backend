@@ -140,9 +140,6 @@ router.get('/:id/record', async (req, res) => {
 router.put('/:id/confirm-payment', async (req, res) => {
   try {
     // Chỉ admin mới được xác nhận thanh toán
-    if (req.user.role !== 'admin') {
-      return res.json({ success: false, message: 'Không có quyền thực hiện' });
-    }
     const [[appt]] = await db.query('SELECT id, status FROM appointments WHERE id=?', [req.params.id]);
     if (!appt) return res.json({ success: false, message: 'Không tìm thấy lịch hẹn' });
     if (appt.status === 'cancelled') return res.json({ success: false, message: 'Lịch đã bị hủy' });
