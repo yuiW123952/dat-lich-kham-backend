@@ -23,6 +23,8 @@ router.get('/me', async (req, res) => {
 });
 
 // GET /api/doctor/queue?date=YYYY-MM-DD
+// Chỉ hiện lịch đã thanh toán (payment_status = 'paid')
+// Sort: in_progress → waiting → absent
 router.get('/queue', async (req, res) => {
   try {
     const date = req.query.date || new Date().toISOString().slice(0, 10);
@@ -32,6 +34,7 @@ router.get('/queue', async (req, res) => {
 
     const [rows] = await db.query(`
       SELECT a.id, a.queue_number, a.status, a.patient_notes, a.profile_id,
+             a.payment_status, a.service_type,
              pp.full_name AS patient_name, pp.date_of_birth, pp.gender, pp.insurance_number,
              s.id AS schedule_id, s.date, s.start_time, s.end_time, s.current_queue,
              dep.name AS department_name,
@@ -41,8 +44,18 @@ router.get('/queue', async (req, res) => {
       JOIN patient_profiles pp ON a.profile_id = pp.id
       JOIN departments dep ON s.department_id = dep.id
       LEFT JOIN medical_records mr ON mr.appointment_id = a.id
-      WHERE s.doctor_id = ? AND s.date = ? AND a.status != 'cancelled'
-      ORDER BY a.queue_number`, [doctor_id, date]);
+      WHERE s.doctor_id = ? AND s.date = ?
+        AND a.status != 'cancelled'
+        AND a.payment_status = 'paid'
+      ORDER BY
+        CASE a.status
+          WHEN 'in_progress' THEN 1
+          WHEN 'waiting' THEN 2
+          WHEN 'absent' THEN 3
+          WHEN 'done' THEN 4
+          ELSE 5
+        END,
+        a.queue_number`, [doctor_id, date]);
 
     const [sch] = await db.query('SELECT current_queue FROM schedules WHERE doctor_id=? AND date=? LIMIT 1', [doctor_id, date]);
     const current_queue = sch.length ? sch[0].current_queue : 0;
@@ -79,6 +92,14 @@ router.put('/appointments/:id/call', async (req, res) => {
   } catch (e) { res.json({ success: false, message: 'Lỗi server' }); }
 });
 
+// PUT /api/doctor/appointments/:id/absent - bệnh nhân chưa vào
+router.put('/appointments/:id/absent', async (req, res) => {
+  try {
+    await db.query(`UPDATE appointments SET status='absent' WHERE id=?`, [req.params.id]);
+    res.json({ success: true });
+  } catch (e) { res.json({ success: false, message: 'Lỗi server' }); }
+});
+
 // PUT /api/doctor/appointments/:id/done
 router.put('/appointments/:id/done', async (req, res) => {
   try {
@@ -87,11 +108,9 @@ router.put('/appointments/:id/done', async (req, res) => {
   } catch (e) { res.json({ success: false, message: 'Lỗi server' }); }
 });
 
-// POST /api/doctor/appointments/:id/record - nhập bệnh án + đơn thuốc chi tiết
+// POST /api/doctor/appointments/:id/record
 router.post('/appointments/:id/record', async (req, res) => {
   const { diagnosis, notes, medicines } = req.body;
-  console.log('medicines:', JSON.stringify(medicines));
-  // medicines = [{ medicine_name, quantity, days, dose_sang, dose_trua, dose_chieu, dose_toi, timing, timing_minutes, note }]
   const conn = await db.getConnection();
   try {
     await conn.beginTransaction();
@@ -100,11 +119,7 @@ router.post('/appointments/:id/record', async (req, res) => {
     const [ex] = await conn.query('SELECT id FROM medical_records WHERE appointment_id=?', [req.params.id]);
     if (ex.length) {
       recordId = ex[0].id;
-      await conn.query(
-        'UPDATE medical_records SET diagnosis=?, notes=? WHERE id=?',
-        [diagnosis, notes, recordId]
-      );
-      // Xóa đơn thuốc cũ để insert lại
+      await conn.query('UPDATE medical_records SET diagnosis=?, notes=? WHERE id=?', [diagnosis, notes, recordId]);
       await conn.query('DELETE FROM prescription_items WHERE medical_record_id=?', [recordId]);
     } else {
       const [ins] = await conn.query(
@@ -114,7 +129,6 @@ router.post('/appointments/:id/record', async (req, res) => {
       recordId = ins.insertId;
     }
 
-    // Insert từng dòng thuốc
     if (Array.isArray(medicines) && medicines.length > 0) {
       for (const m of medicines) {
         if (!m.medicine_name || !m.medicine_name.trim()) continue;
@@ -124,19 +138,9 @@ router.post('/appointments/:id/record', async (req, res) => {
              dose_sang, dose_trua, dose_chieu, dose_toi,
              timing, timing_minutes, note)
            VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
-          [
-            recordId,
-            m.medicine_name.trim(),
-            m.quantity || '',
-            m.days || 1,
-            m.dose_sang || 0,
-            m.dose_trua || 0,
-            m.dose_chieu || 0,
-            m.dose_toi || 0,
-            m.timing || 'sau_an',
-            m.timing_minutes || 30,
-            m.note || ''
-          ]
+          [recordId, m.medicine_name.trim(), m.quantity || '', m.days || 1,
+           m.dose_sang || 0, m.dose_trua || 0, m.dose_chieu || 0, m.dose_toi || 0,
+           m.timing || 'sau_an', m.timing_minutes || 0, m.note || '']
         );
       }
     }
@@ -146,13 +150,14 @@ router.post('/appointments/:id/record', async (req, res) => {
     res.json({ success: true, message: 'Lưu bệnh án thành công' });
   } catch (e) {
     await conn.rollback();
+    console.error('Lỗi record:', e.message);
     res.json({ success: false, message: 'Lỗi server' });
   } finally {
     conn.release();
   }
 });
 
-// GET /api/doctor/appointments/:id/record - xem bệnh án + đơn thuốc chi tiết
+// GET /api/doctor/appointments/:id/record
 router.get('/appointments/:id/record', async (req, res) => {
   try {
     const [rows] = await db.query(`
@@ -168,12 +173,10 @@ router.get('/appointments/:id/record', async (req, res) => {
       WHERE mr.appointment_id = ?`, [req.params.id]);
     if (!rows.length) return res.json({ success: false, message: 'Chưa có bệnh án' });
 
-    // Lấy đơn thuốc chi tiết
     const [medicines] = await db.query(
       'SELECT * FROM prescription_items WHERE medical_record_id=? ORDER BY id',
       [rows[0].id]
     );
-
     res.json({ success: true, data: { ...rows[0], medicines } });
   } catch (e) { res.json({ success: false, message: 'Lỗi server' }); }
 });
@@ -192,13 +195,10 @@ router.get('/patient-history/:profileId', async (req, res) => {
       JOIN users u_doc ON d.user_id = u_doc.id
       JOIN departments dep ON s.department_id = dep.id
       LEFT JOIN medical_records mr ON mr.appointment_id = a.id
-      WHERE a.profile_id = ?
-        AND a.status = 'done'
-        AND a.id != ?
+      WHERE a.profile_id = ? AND a.status = 'done' AND a.id != ?
       ORDER BY s.date DESC, a.id DESC
       LIMIT 10`, [req.params.profileId, exclude]);
 
-    // Lấy đơn thuốc cho mỗi lần khám
     for (const row of rows) {
       if (row.record_id) {
         const [meds] = await db.query(
@@ -210,8 +210,47 @@ router.get('/patient-history/:profileId', async (req, res) => {
         row.medicines = [];
       }
     }
-
     res.json({ success: true, data: rows });
+  } catch (e) { res.json({ success: false, message: 'Lỗi server' }); }
+});
+
+// GET /api/doctor/my-records - lịch sử bệnh án của bác sĩ
+router.get('/my-records', async (req, res) => {
+  try {
+    const { page = 1, limit = 20, search = '' } = req.query;
+    const offset = (parseInt(page) - 1) * parseInt(limit);
+    const [doc] = await db.query('SELECT id FROM doctors WHERE user_id=?', [req.user.id]);
+    if (!doc.length) return res.json({ success: false, message: 'Không tìm thấy bác sĩ' });
+    const doctor_id = doc[0].id;
+
+    let searchWhere = '';
+    const params = [doctor_id];
+    if (search) {
+      searchWhere = ' AND (pp.full_name LIKE ? OR mr.diagnosis LIKE ?)';
+      params.push(`%${search}%`, `%${search}%`);
+    }
+
+    const [[{ total }]] = await db.query(`
+      SELECT COUNT(*) AS total FROM medical_records mr
+      JOIN appointments a ON mr.appointment_id = a.id
+      JOIN schedules s ON a.schedule_id = s.id
+      JOIN patient_profiles pp ON a.profile_id = pp.id
+      WHERE s.doctor_id = ?${searchWhere}`, params);
+
+    const [rows] = await db.query(`
+      SELECT mr.id, mr.diagnosis, mr.notes, mr.created_at,
+             pp.full_name AS patient_name, pp.date_of_birth, pp.gender,
+             a.queue_number, s.date, s.start_time, dep.name AS department_name
+      FROM medical_records mr
+      JOIN appointments a ON mr.appointment_id = a.id
+      JOIN schedules s ON a.schedule_id = s.id
+      JOIN patient_profiles pp ON a.profile_id = pp.id
+      JOIN departments dep ON s.department_id = dep.id
+      WHERE s.doctor_id = ?${searchWhere}
+      ORDER BY mr.created_at DESC
+      LIMIT ? OFFSET ?`, [...params, parseInt(limit), offset]);
+
+    res.json({ success: true, data: rows, total });
   } catch (e) { res.json({ success: false, message: 'Lỗi server' }); }
 });
 
