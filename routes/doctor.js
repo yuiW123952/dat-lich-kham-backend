@@ -46,7 +46,7 @@ router.get('/queue', async (req, res) => {
       LEFT JOIN medical_records mr ON mr.appointment_id = a.id
       WHERE s.doctor_id = ? AND s.date = ?
         AND a.status != 'cancelled'
-        AND a.payment_status = 'paid'
+        AND a.checked_in = 1
       ORDER BY
         CASE a.status
           WHEN 'in_progress' THEN 1
