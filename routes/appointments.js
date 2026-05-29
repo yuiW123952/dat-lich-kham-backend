@@ -115,6 +115,65 @@ router.get('/my', async (req, res) => {
   } catch (e) { res.json({ success: false, message: 'Lỗi server' }); }
 });
 
+// GET /api/appointments/find-by-cccd - tìm lịch hẹn theo CCCD (cho lễ tân)
+router.get('/find-by-cccd', async (req, res) => {
+  try {
+    const { cccd, date } = req.query;
+    if (!cccd) return res.json({ success: false, message: 'Vui lòng nhập CCCD' });
+
+    const dateFilter = date || new Date().toISOString().slice(0, 10);
+
+    const [rows] = await db.query(`
+      SELECT a.id, a.queue_number, a.status, a.payment_method, a.payment_status,
+             a.service_type, a.checked_in,
+             pp.full_name AS patient_name, pp.date_of_birth, pp.gender,
+             pp.cccd, pp.insurance_number,
+             dep.name AS department_name,
+             s.date, s.start_time, s.end_time,
+             u_doc.full_name AS doctor_name
+      FROM appointments a
+      JOIN patient_profiles pp ON a.profile_id = pp.id
+      JOIN schedules s ON a.schedule_id = s.id
+      JOIN doctors d ON s.doctor_id = d.id
+      JOIN users u_doc ON d.user_id = u_doc.id
+      JOIN departments dep ON s.department_id = dep.id
+      WHERE pp.cccd = ?
+        AND s.date = ?
+        AND a.status != 'cancelled'
+      ORDER BY a.queue_number`, [cccd, dateFilter]);
+
+    if (!rows.length) return res.json({ success: false, message: 'Không tìm thấy lịch hẹn' });
+    res.json({ success: true, data: rows });
+  } catch (e) { res.json({ success: false, message: 'Lỗi server' }); }
+});
+
+// GET /api/appointments/find-by-id - tìm lịch hẹn theo appointment_id (cho lễ tân quét QR)
+router.get('/find-by-id', async (req, res) => {
+  try {
+    const { id } = req.query;
+    if (!id) return res.json({ success: false, message: 'Thiếu ID lịch hẹn' });
+
+    const [[row]] = await db.query(`
+      SELECT a.id, a.queue_number, a.status, a.payment_method, a.payment_status,
+             a.service_type, a.checked_in,
+             pp.full_name AS patient_name, pp.date_of_birth, pp.gender,
+             pp.cccd, pp.insurance_number,
+             dep.name AS department_name,
+             s.date, s.start_time, s.end_time,
+             u_doc.full_name AS doctor_name
+      FROM appointments a
+      JOIN patient_profiles pp ON a.profile_id = pp.id
+      JOIN schedules s ON a.schedule_id = s.id
+      JOIN doctors d ON s.doctor_id = d.id
+      JOIN users u_doc ON d.user_id = u_doc.id
+      JOIN departments dep ON s.department_id = dep.id
+      WHERE a.id = ? AND a.status != 'cancelled'`, [id]);
+
+    if (!row) return res.json({ success: false, message: 'Không tìm thấy lịch hẹn' });
+    res.json({ success: true, data: row });
+  } catch (e) { res.json({ success: false, message: 'Lỗi server' }); }
+});
+
 // GET /api/appointments/:id/record - bệnh nhân xem bệnh án + đơn thuốc
 router.get('/:id/record', async (req, res) => {
   try {
@@ -144,8 +203,6 @@ router.put('/:id/confirm-payment', async (req, res) => {
     if (!appt) return res.json({ success: false, message: 'Không tìm thấy lịch hẹn' });
     if (appt.status === 'cancelled') return res.json({ success: false, message: 'Lịch đã bị hủy' });
 
-    // Nếu tiền mặt → cập nhật payment_status = paid
-    // Cả 2 phương thức → cập nhật checked_in = 1
     await db.query(
       'UPDATE appointments SET checked_in = 1, payment_status = "paid" WHERE id=?',
       [req.params.id]
