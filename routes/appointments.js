@@ -136,25 +136,26 @@ router.get('/:id/record', async (req, res) => {
   } catch (e) { res.json({ success: false, message: 'Lỗi server' }); }
 });
 
-// PUT /api/appointments/:id/confirm-payment - xác nhận thanh toán (admin/lễ tân)
+// PUT /api/appointments/:id/confirm-payment - lễ tân xác nhận bệnh nhân đã đến
 router.put('/:id/confirm-payment', async (req, res) => {
   try {
-    // Chỉ admin mới được xác nhận thanh toán
-    const [[appt]] = await db.query('SELECT id, status FROM appointments WHERE id=?', [req.params.id]);
+    const [[appt]] = await db.query('SELECT id, status, payment_method FROM appointments WHERE id=?', [req.params.id]);
     if (!appt) return res.json({ success: false, message: 'Không tìm thấy lịch hẹn' });
     if (appt.status === 'cancelled') return res.json({ success: false, message: 'Lịch đã bị hủy' });
 
-    await db.query('UPDATE appointments SET payment_status=? WHERE id=?', ['paid', req.params.id]);
-    res.json({ success: true, message: 'Đã xác nhận thanh toán' });
+    // Nếu tiền mặt → cập nhật payment_status = paid
+    // Cả 2 phương thức → cập nhật checked_in = 1
+    await db.query(
+      'UPDATE appointments SET checked_in = 1, payment_status = "paid" WHERE id=?',
+      [req.params.id]
+    );
+    res.json({ success: true, message: 'Đã xác nhận bệnh nhân đã đến' });
   } catch (e) { res.json({ success: false, message: 'Lỗi server' }); }
 });
 
 // PUT /api/appointments/:id/absent - đánh dấu bệnh nhân vắng mặt
 router.put('/:id/absent', async (req, res) => {
   try {
-    if (req.user.role !== 'doctor') {
-      return res.json({ success: false, message: 'Không có quyền thực hiện' });
-    }
     await db.query(`UPDATE appointments SET status='absent' WHERE id=?`, [req.params.id]);
     res.json({ success: true });
   } catch (e) { res.json({ success: false, message: 'Lỗi server' }); }
