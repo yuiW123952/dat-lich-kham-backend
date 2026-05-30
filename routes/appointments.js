@@ -61,12 +61,20 @@ router.post('/', async (req, res) => {
     if (dupCheck.length) { await conn.rollback(); return res.json({ success: false, message: 'Hồ sơ này đã có lịch khám trong buổi này' }); }
 
     const queue_number = sch.booked + 1;
+
+    // Tính daily_code: đếm tổng lịch hẹn trong ngày hôm đó (chưa bị huỷ)
+    const [[{ dailyCount }]] = await conn.query(`
+      SELECT COUNT(*) AS dailyCount FROM appointments a
+      JOIN schedules s ON a.schedule_id = s.id
+      WHERE s.date = ? AND a.status != 'cancelled'`, [refSch.date]);
+    const daily_code = Number(dailyCount) + 1;
+
     const [r] = await conn.query(
-      'INSERT INTO appointments (schedule_id, profile_id, queue_number, patient_notes, payment_method, service_type) VALUES (?,?,?,?,?,?)',
-      [actual_schedule_id, profile_id, queue_number, patient_notes || '', payment_method || 'cash', service_type || 'dichvu']
+      'INSERT INTO appointments (schedule_id, profile_id, queue_number, patient_notes, payment_method, service_type, daily_code) VALUES (?,?,?,?,?,?,?)',
+      [actual_schedule_id, profile_id, queue_number, patient_notes || '', payment_method || 'cash', service_type || 'dichvu', daily_code]
     );
     await conn.commit();
-    res.json({ success: true, data: { id: r.insertId, queueNumber: queue_number } });
+    res.json({ success: true, data: { id: r.insertId, queueNumber: queue_number, dailyCode: daily_code } });
   } catch (e) {
     await conn.rollback();
     res.json({ success: false, message: 'Lỗi server' });
@@ -123,7 +131,7 @@ router.get('/find-by-cccd', async (req, res) => {
     const dateFilter = date || new Date().toISOString().slice(0, 10);
     const [rows] = await db.query(`
       SELECT a.id, a.queue_number, a.status, a.payment_method, a.payment_status,
-             a.service_type, a.checked_in,
+             a.service_type, a.checked_in, a.daily_code,
              pp.full_name AS patient_name, pp.date_of_birth, pp.gender,
              pp.cccd, pp.insurance_number,
              dep.name AS department_name,
@@ -142,14 +150,15 @@ router.get('/find-by-cccd', async (req, res) => {
   } catch (e) { res.json({ success: false, message: 'Lỗi server' }); }
 });
 
-// GET /api/appointments/find-by-id
-router.get('/find-by-id', async (req, res) => {
+// GET /api/appointments/find-by-code - tìm theo daily_code + date (cho lễ tân)
+router.get('/find-by-code', async (req, res) => {
   try {
-    const { id } = req.query;
-    if (!id) return res.json({ success: false, message: 'Thiếu ID lịch hẹn' });
+    const { code, date } = req.query;
+    if (!code) return res.json({ success: false, message: 'Vui lòng nhập mã lịch hẹn' });
+    const dateFilter = date || new Date().toISOString().slice(0, 10);
     const [[row]] = await db.query(`
       SELECT a.id, a.queue_number, a.status, a.payment_method, a.payment_status,
-             a.service_type, a.checked_in,
+             a.service_type, a.checked_in, a.daily_code,
              pp.full_name AS patient_name, pp.date_of_birth, pp.gender,
              pp.cccd, pp.insurance_number,
              dep.name AS department_name,
@@ -161,7 +170,7 @@ router.get('/find-by-id', async (req, res) => {
       JOIN doctors d ON s.doctor_id = d.id
       JOIN users u_doc ON d.user_id = u_doc.id
       JOIN departments dep ON s.department_id = dep.id
-      WHERE a.id = ? AND a.status != 'cancelled'`, [id]);
+      WHERE a.daily_code = ? AND s.date = ? AND a.status != 'cancelled'`, [code, dateFilter]);
     if (!row) return res.json({ success: false, message: 'Không tìm thấy lịch hẹn' });
     res.json({ success: true, data: row });
   } catch (e) { res.json({ success: false, message: 'Lỗi server' }); }
@@ -182,8 +191,7 @@ router.get('/:id/record', async (req, res) => {
   } catch (e) { res.json({ success: false, message: 'Lỗi server' }); }
 });
 
-// PUT /api/appointments/:id/confirm-payment - bệnh nhân xác nhận đã thanh toán Momo
-// Chỉ set payment_status = paid, KHÔNG set checked_in
+// PUT /api/appointments/:id/confirm-payment
 router.put('/:id/confirm-payment', async (req, res) => {
   try {
     const [[appt]] = await db.query('SELECT id, status FROM appointments WHERE id=?', [req.params.id]);
@@ -194,8 +202,7 @@ router.put('/:id/confirm-payment', async (req, res) => {
   } catch (e) { res.json({ success: false, message: 'Lỗi server' }); }
 });
 
-// PUT /api/appointments/:id/checkin - lễ tân xác nhận bệnh nhân đã đến
-// Set checked_in = 1 + payment_status = paid (thu tiền mặt)
+// PUT /api/appointments/:id/checkin
 router.put('/:id/checkin', async (req, res) => {
   try {
     const [[appt]] = await db.query('SELECT id, status FROM appointments WHERE id=?', [req.params.id]);
