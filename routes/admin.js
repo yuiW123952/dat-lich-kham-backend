@@ -159,8 +159,6 @@ router.put('/schedules/:id', async (req, res) => {
 
 router.delete('/schedules/:id', async (req, res) => {
   try {
-    const [booked] = await db.query(`SELECT id FROM appointments WHERE schedule_id=? AND status='waiting'`, [req.params.id]);
-    if (booked.length) return res.json({ success: false, message: 'Lịch đã có bệnh nhân đặt, không thể xóa' });
     await db.query('DELETE FROM schedules WHERE id=?', [req.params.id]);
     res.json({ success: true });
   } catch (e) { res.json({ success: false, message: 'Lỗi server' }); }
@@ -247,4 +245,5 @@ router.get('/reviews', async (req, res) => {
     res.json({ success: true, data: rows });
   } catch (e) { res.json({ success: false, message: 'Lỗi server' }); }
 });
+
 module.exports = router;

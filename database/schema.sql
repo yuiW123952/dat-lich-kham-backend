@@ -80,8 +80,8 @@ CREATE TABLE IF NOT EXISTS appointments (
   patient_notes  TEXT,
   payment_method VARCHAR(50) DEFAULT 'cash',
   created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (schedule_id) REFERENCES schedules(id),
-  FOREIGN KEY (profile_id)  REFERENCES patient_profiles(id)
+  FOREIGN KEY (schedule_id) REFERENCES schedules(id) ON DELETE CASCADE,
+  FOREIGN KEY (profile_id)  REFERENCES patient_profiles(id) ON DELETE CASCADE
 );
 
 -- ── MEDICAL RECORDS (BỆNH ÁN) ───────────────────────────────
