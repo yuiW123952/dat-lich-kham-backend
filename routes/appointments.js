@@ -226,7 +226,7 @@ router.put('/:id/checkin', async (req, res) => {
     const [[appt]] = await db.query('SELECT id, status FROM appointments WHERE id=?', [req.params.id]);
     if (!appt) return res.json({ success: false, message: 'Không tìm thấy lịch hẹn' });
     if (appt.status === 'cancelled') return res.json({ success: false, message: 'Lịch đã bị hủy' });
-    await db.query('UPDATE appointments SET checked_in = 1, payment_status = "paid" WHERE id=?', [req.params.id]);
+    await db.query('UPDATE appointments SET checked_in = 1, payment_status = "paid", checked_in_at = NOW() WHERE id=?', [req.params.id]);
     res.json({ success: true, message: 'Đã xác nhận bệnh nhân đã đến' });
   } catch (e) { res.json({ success: false, message: 'Lỗi server' }); }
 });
