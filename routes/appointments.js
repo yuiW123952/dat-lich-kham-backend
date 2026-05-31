@@ -167,6 +167,31 @@ router.get('/find-by-id', async (req, res) => {
   } catch (e) { res.json({ success: false, message: 'Lỗi server' }); }
 });
 
+
+// GET /api/appointments/by-date - lễ tân xem lịch đã check-in theo ngày
+router.get('/by-date', async (req, res) => {
+  try {
+    const { date } = req.query;
+    const dateFilter = date || new Date().toISOString().slice(0, 10);
+    const [rows] = await db.query(`
+      SELECT a.id, a.queue_number, a.status, a.payment_method, a.payment_status,
+             a.service_type, a.checked_in, a.checked_in_at,
+             pp.full_name AS patient_name, pp.date_of_birth, pp.gender,
+             pp.cccd, pp.insurance_number,
+             dep.name AS department_name, s.date, s.start_time, s.end_time,
+             u_doc.full_name AS doctor_name
+      FROM appointments a
+      JOIN patient_profiles pp ON a.profile_id = pp.id
+      JOIN schedules s ON a.schedule_id = s.id
+      JOIN doctors d ON s.doctor_id = d.id
+      JOIN users u_doc ON d.user_id = u_doc.id
+      JOIN departments dep ON s.department_id = dep.id
+      WHERE s.date = ? AND a.checked_in = 1 AND a.status != 'cancelled'
+      ORDER BY a.checked_in_at DESC`, [dateFilter]);
+    res.json({ success: true, data: rows });
+  } catch (e) { res.json({ success: false, message: 'Lỗi server' }); }
+});
+
 // GET /api/appointments/:id/record
 router.get('/:id/record', async (req, res) => {
   try {
@@ -201,7 +226,7 @@ router.put('/:id/checkin', async (req, res) => {
     const [[appt]] = await db.query('SELECT id, status FROM appointments WHERE id=?', [req.params.id]);
     if (!appt) return res.json({ success: false, message: 'Không tìm thấy lịch hẹn' });
     if (appt.status === 'cancelled') return res.json({ success: false, message: 'Lịch đã bị hủy' });
-    await db.query('UPDATE appointments SET checked_in = 1, payment_status = "paid", checked_in_at = NOW() WHERE id=?', [req.params.id]);
+    await db.query('UPDATE appointments SET checked_in = 1, payment_status = "paid" WHERE id=?', [req.params.id]);
     res.json({ success: true, message: 'Đã xác nhận bệnh nhân đã đến' });
   } catch (e) { res.json({ success: false, message: 'Lỗi server' }); }
 });
