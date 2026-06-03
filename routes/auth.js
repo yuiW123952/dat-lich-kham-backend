@@ -12,15 +12,15 @@ const sendOtpEmail = async (to, otp) => {
   await resend.emails.send({
     from: 'onboarding@resend.dev',
     to,
-    subject: 'Mã OTP xác thực MedBook',
-    html: `
-      <div style="font-family:Arial,sans-serif;max-width:400px;margin:auto;padding:24px;border:1px solid #eee;border-radius:8px;">
-        <h2 style="color:#1a73e8;">MedBook</h2>
-        <p>Mã OTP của bạn là:</p>
-        <h1 style="letter-spacing:8px;color:#1a73e8;">${otp}</h1>
-        <p style="color:#888;font-size:13px;">Mã có hiệu lực trong 5 phút. Không chia sẻ mã này cho bất kỳ ai.</p>
-      </div>
-    `,
+    subject: 'Mã OTP xác thực HCM-UTE',
+html: `
+  <div style="font-family:Arial,sans-serif;max-width:400px;margin:auto;padding:24px;border:1px solid #eee;border-radius:8px;">
+    <h2 style="color:#1a73e8;">HCM-UTE</h2>
+    <p>Mã OTP của bạn là:</p>
+    <h1 style="letter-spacing:8px;color:#1a73e8;">${otp}</h1>
+    <p style="color:#888;font-size:13px;">Mã có hiệu lực trong 5 phút. Không chia sẻ mã này cho bất kỳ ai.</p>
+  </div>
+`,
   });
 };
 
