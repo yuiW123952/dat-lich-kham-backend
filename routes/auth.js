@@ -2,24 +2,15 @@ const express = require('express');
 const router  = express.Router();
 const bcrypt  = require('bcryptjs');
 const jwt     = require('jsonwebtoken');
-const nodemailer = require('nodemailer');
+const { Resend } = require('resend');
 const db      = require('../config/db');
 const auth    = require('../middleware/auth');
 
-// Cấu hình Gmail transporter
-const transporter = nodemailer.createTransport({
-  host: 'smtp.gmail.com',
-  port: 587,
-  secure: false,
-  auth: {
-    user: process.env.GMAIL_USER,
-    pass: process.env.GMAIL_PASS,
-  },
-});
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 const sendOtpEmail = async (to, otp) => {
-  await transporter.sendMail({
-    from: `"MedBook" <${process.env.GMAIL_USER}>`,
+  await resend.emails.send({
+    from: 'onboarding@resend.dev',
     to,
     subject: 'Mã OTP xác thực MedBook',
     html: `
