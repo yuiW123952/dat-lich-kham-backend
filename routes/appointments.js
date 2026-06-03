@@ -263,4 +263,38 @@ router.put('/:id/cancel', async (req, res) => {
   } catch (e) { res.json({ success: false, message: 'Lỗi server' }); }
 });
 
+// GET /api/appointments/:id/test-orders - bệnh nhân xem yêu cầu xét nghiệm
+router.get('/:id/test-orders', async (req, res) => {
+  try {
+    const [[appt]] = await db.query(`
+      SELECT a.id FROM appointments a
+      JOIN patient_profiles pp ON a.profile_id = pp.id
+      WHERE a.id=? AND pp.user_id=?`, [req.params.id, req.user.id]);
+    if (!appt) return res.json({ success: false, message: 'Không tìm thấy' });
+
+    const [rows] = await db.query(`
+      SELECT to2.*, tt.name AS test_name, tt.price, tt.description
+      FROM test_orders to2
+      JOIN test_types tt ON to2.test_type_id = tt.id
+      WHERE to2.appointment_id = ?`, [req.params.id]);
+    res.json({ success: true, data: rows });
+  } catch (e) { res.json({ success: false, message: 'Lỗi server' }); }
+});
+
+// PUT /api/appointments/:id/test-orders/confirm-payment - xác nhận đã thanh toán
+router.put('/:id/test-orders/confirm-payment', async (req, res) => {
+  try {
+    const [[appt]] = await db.query(`
+      SELECT a.id FROM appointments a
+      JOIN patient_profiles pp ON a.profile_id = pp.id
+      WHERE a.id=? AND pp.user_id=?`, [req.params.id, req.user.id]);
+    if (!appt) return res.json({ success: false, message: 'Không tìm thấy' });
+
+    await db.query(`
+      UPDATE test_orders SET status='paid', payment_method='vietqr', paid_at=NOW()
+      WHERE appointment_id=? AND status='pending'`, [req.params.id]);
+    res.json({ success: true });
+  } catch (e) { res.json({ success: false, message: 'Lỗi server' }); }
+});
+
 module.exports = router;
