@@ -148,6 +148,40 @@ INSERT INTO patient_profiles (user_id, full_name, date_of_birth, gender, address
 -- THAY HASH NÀY bằng cách chạy: require('bcryptjs').hashSync('MatKhauMoi@123', 10)
 -- hoặc sử dụng endpoint /api/admin/doctors để tạo tài khoản mới (tự hash)
 -- ============================================================
+-- ── TEST TYPES (DANH MỤC XÉT NGHIỆM) ───────────────────────
+CREATE TABLE IF NOT EXISTS test_types (
+  id          INT PRIMARY KEY AUTO_INCREMENT,
+  name        VARCHAR(255) NOT NULL,
+  description TEXT,
+  price       INT NOT NULL DEFAULT 0,
+  is_active   TINYINT(1) DEFAULT 1,
+  created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+INSERT INTO test_types (name, description, price) VALUES
+('Xét nghiệm máu tổng quát',   'CBC - Công thức máu toàn phần',         150000),
+('Xét nghiệm nước tiểu',       'Tổng phân tích nước tiểu 10 thông số',   80000),
+('Siêu âm bụng tổng quát',     'Siêu âm các cơ quan ổ bụng',            200000),
+('X-quang phổi',                'Chụp X-quang ngực thẳng',               120000),
+('Điện tâm đồ (ECG)',           'Đo hoạt động điện tim 12 chuyển đạo',   100000),
+('Xét nghiệm đường huyết',     'Glucose máu lúc đói',                    60000),
+('Xét nghiệm chức năng gan',   'AST, ALT, GGT, Bilirubin',              180000),
+('Xét nghiệm chức năng thận',  'Creatinine, Ure, Acid uric',            160000);
+
+-- ── TEST ORDERS (YÊU CẦU XÉT NGHIỆM) ───────────────────────
+CREATE TABLE IF NOT EXISTS test_orders (
+  id             INT PRIMARY KEY AUTO_INCREMENT,
+  appointment_id INT NOT NULL,
+  test_type_id   INT NOT NULL,
+  status         ENUM('pending','paid','done') DEFAULT 'pending',
+  payment_method VARCHAR(50) DEFAULT 'cash',
+  paid_at        TIMESTAMP NULL,
+  notes          TEXT,
+  created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (appointment_id) REFERENCES appointments(id) ON DELETE CASCADE,
+  FOREIGN KEY (test_type_id)   REFERENCES test_types(id)
+);
+
 CREATE TABLE IF NOT EXISTS news (
   id         INT PRIMARY KEY AUTO_INCREMENT,
   title      VARCHAR(255) NOT NULL,
