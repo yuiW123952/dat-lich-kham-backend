@@ -18,24 +18,28 @@ router.post('/sepay', async (req, res) => {
 
     if (!content) return res.json({ success: false, message: 'Thiếu nội dung' });
 
-    // Tìm mã XN-{appointmentId} trong nội dung chuyển khoản
-    const match = content.match(/XN-(\d+)/i);
-    if (!match) {
-      console.log('⚠️ Không tìm thấy mã XN trong nội dung:', content);
-      return res.json({ success: false, message: 'Không khớp mã xét nghiệm' });
+    // Tìm mã XN-{id} cho xét nghiệm hoặc DL-{id} cho đặt lịch
+    const xnMatch = content.match(/XN-(\d+)/i);
+    const dlMatch = content.match(/DL-(\d+)/i);
+
+    if (xnMatch) {
+      const appointmentId = parseInt(xnMatch[1]);
+      console.log(`✅ Xét nghiệm appointment_id=${appointmentId}`);
+      await db.query(`
+        UPDATE test_orders SET status='paid', payment_method='vietqr', paid_at=NOW()
+        WHERE appointment_id=? AND status='pending'
+      `, [appointmentId]);
+    } else if (dlMatch) {
+      const appointmentId = parseInt(dlMatch[1]);
+      console.log(`✅ Đặt lịch appointment_id=${appointmentId}`);
+      await db.query(`
+        UPDATE appointments SET payment_status='paid', checked_in=1, checked_in_at=NOW(), status='waiting'
+        WHERE id=? AND payment_status!='paid'
+      `, [appointmentId]);
+    } else {
+      console.log('⚠️ Không tìm thấy mã hợp lệ trong nội dung:', content);
+      return res.json({ success: false, message: 'Không khớp mã' });
     }
-
-    const appointmentId = parseInt(match[1]);
-    console.log(`✅ Khớp appointment_id=${appointmentId}, số tiền=${transferAmount}`);
-
-    // Update tất cả test_orders pending của appointment này
-    const [result] = await db.query(`
-      UPDATE test_orders
-      SET status='paid', payment_method='vietqr', paid_at=NOW()
-      WHERE appointment_id=? AND status='pending'
-    `, [appointmentId]);
-
-    console.log(`✅ Đã update ${result.affectedRows} xét nghiệm sang paid`);
     res.json({ success: true });
 
   } catch (e) {
