@@ -274,8 +274,14 @@ router.put('/:id/cancel', async (req, res) => {
 router.get('/:id/test-orders', async (req, res) => {
   try {
     const [[appt]] = await db.query(`
-      SELECT a.id FROM appointments a
+      SELECT a.id, pp.full_name AS patient_name, pp.date_of_birth,
+             u_doc.full_name AS doctor_name, dep.name AS department_name, s.date
+      FROM appointments a
       JOIN patient_profiles pp ON a.profile_id = pp.id
+      JOIN schedules s ON a.schedule_id = s.id
+      JOIN doctors d ON s.doctor_id = d.id
+      JOIN users u_doc ON d.user_id = u_doc.id
+      JOIN departments dep ON s.department_id = dep.id
       WHERE a.id=? AND pp.user_id=?`, [req.params.id, req.user.id]);
     if (!appt) return res.json({ success: false, message: 'Không tìm thấy' });
 
@@ -284,7 +290,7 @@ router.get('/:id/test-orders', async (req, res) => {
       FROM test_orders to2
       JOIN test_types tt ON to2.test_type_id = tt.id
       WHERE to2.appointment_id = ?`, [req.params.id]);
-    res.json({ success: true, data: rows });
+    res.json({ success: true, data: rows, appt });
   } catch (e) { res.json({ success: false, message: 'Lỗi server' }); }
 });
 
