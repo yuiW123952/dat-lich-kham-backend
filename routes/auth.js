@@ -2,8 +2,27 @@ const express = require('express');
 const router  = express.Router();
 const bcrypt  = require('bcryptjs');
 const jwt     = require('jsonwebtoken');
+const { Resend } = require('resend');
 const db      = require('../config/db');
 const auth    = require('../middleware/auth');
+
+const resend = new Resend(process.env.RESEND_API_KEY);
+
+const sendOtpEmail = async (to, otp) => {
+  await resend.emails.send({
+    from: 'onboarding@resend.dev',
+    to,
+    subject: 'Mã OTP xác thực HCM-UTE',
+html: `
+  <div style="font-family:Arial,sans-serif;max-width:400px;margin:auto;padding:24px;border:1px solid #eee;border-radius:8px;">
+    <h2 style="color:#1a73e8;">HCM-UTE</h2>
+    <p>Mã OTP của bạn là:</p>
+    <h1 style="letter-spacing:8px;color:#1a73e8;">${otp}</h1>
+    <p style="color:#888;font-size:13px;">Mã có hiệu lực trong 5 phút. Không chia sẻ mã này cho bất kỳ ai.</p>
+  </div>
+`,
+  });
+};
 
 // POST /api/auth/login
 router.post('/login', async (req, res) => {
@@ -24,22 +43,26 @@ const otpStore = new Map();
 
 // POST /api/auth/send-otp
 router.post('/send-otp', async (req, res) => {
-  const { phone, full_name, password } = req.body;
-  if (!phone || !full_name || !password)
+  const { phone, full_name, password, email } = req.body;
+  if (!phone || !full_name || !password || !email)
     return res.json({ success: false, message: 'Thiếu thông tin' });
   try {
     const [ex] = await db.query('SELECT id FROM users WHERE phone = ?', [phone]);
     if (ex.length)
       return res.json({ success: false, message: 'Số điện thoại đã được đăng ký' });
 
+    const [exEmail] = await db.query('SELECT id FROM users WHERE email = ?', [email]);
+    if (exEmail.length)
+      return res.json({ success: false, message: 'Email đã được đăng ký' });
+
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     const expiry = Date.now() + 5 * 60 * 1000;
     const hashed = await bcrypt.hash(password, 10);
-    otpStore.set(phone, { otp, expiry, data: { full_name, phone, hashed } });
+    otpStore.set(phone, { otp, expiry, data: { full_name, phone, email, hashed } });
 
-    console.log(`[OTP] SĐT: ${phone} | Mã: ${otp}`);
+    await sendOtpEmail(email, otp);
 
-    res.json({ success: true, message: 'Đã gửi OTP về số điện thoại của bạn' });
+    res.json({ success: true, message: 'Đã gửi OTP về email của bạn' });
   } catch (e) {
     console.error(e);
     res.json({ success: false, message: 'Lỗi server' });
@@ -59,11 +82,11 @@ router.post('/verify-otp', async (req, res) => {
   if (record.otp !== otp)
     return res.json({ success: false, message: 'Mã OTP không đúng' });
   try {
-    const { full_name, hashed } = record.data;
+    const { full_name, email, hashed } = record.data;
     await db.query(
-  'INSERT INTO users (phone, password, role) VALUES (?, ?, ?)',
-  [phone, hashed, 'patient']
-);
+      'INSERT INTO users (full_name, phone, email, password, role) VALUES (?, ?, ?, ?, ?)',
+      [full_name, phone, email, hashed, 'patient']
+    );
     otpStore.delete(phone);
     res.json({ success: true, message: 'Đăng ký thành công' });
   } catch (e) {
@@ -87,7 +110,7 @@ router.post('/register', async (req, res) => {
 // GET /api/auth/me
 router.get('/me', auth, async (req, res) => {
   try {
-    const [users] = await db.query('SELECT id, full_name, phone, role FROM users WHERE id = ?', [req.user.id]);
+    const [users] = await db.query('SELECT id, full_name, phone, email, role FROM users WHERE id = ?', [req.user.id]);
     if (!users.length) return res.json({ success: false, message: 'Không tìm thấy người dùng' });
     const [profiles] = await db.query('SELECT * FROM patient_profiles WHERE user_id = ?', [req.user.id]);
     res.json({ success: true, data: { ...users[0], profiles } });
@@ -111,18 +134,20 @@ router.post('/forgot-send-otp', async (req, res) => {
   if (!phone || !new_password)
     return res.json({ success: false, message: 'Thiếu thông tin' });
   try {
-    const [rows] = await db.query('SELECT id FROM users WHERE phone = ? AND role = ?', [phone, 'patient']);
+    const [rows] = await db.query('SELECT id, email FROM users WHERE phone = ? AND role = ?', [phone, 'patient']);
     if (!rows.length)
       return res.json({ success: false, message: 'Số điện thoại không tồn tại' });
+    if (!rows[0].email)
+      return res.json({ success: false, message: 'Tài khoản chưa có email, vui lòng liên hệ hỗ trợ' });
 
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     const expiry = Date.now() + 5 * 60 * 1000;
     const hashed = await bcrypt.hash(new_password, 10);
     forgotOtpStore.set(phone, { otp, expiry, hashed });
 
-    console.log(`[OTP Quên MK] SĐT: ${phone} | Mã: ${otp}`);
+    await sendOtpEmail(rows[0].email, otp);
 
-    res.json({ success: true, message: 'Đã gửi OTP về số điện thoại của bạn' });
+    res.json({ success: true, message: 'Đã gửi OTP về email của bạn' });
   } catch (e) {
     console.error(e);
     res.json({ success: false, message: 'Lỗi server' });
@@ -187,7 +212,6 @@ router.put('/profiles/:id', auth, async (req, res) => {
   } catch (e) { res.json({ success: false, message: 'Lỗi server' }); }
 });
 
-// DELETE /api/auth/profiles/:id
 // DELETE /api/auth/profiles/:id
 router.delete('/profiles/:id', auth, async (req, res) => {
   try {
