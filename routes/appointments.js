@@ -346,7 +346,7 @@ router.get('/test-orders-by-cccd', async (req, res) => {
         JOIN test_types tt ON to2.test_type_id = tt.id
         WHERE to2.appointment_id = ? AND to2.status = 'pending'`, [row.appointment_id]);
       row.test_orders = orders;
-      row.total = orders.reduce((s: number, o: any) => s + Number(o.price), 0);
+      row.total = orders.reduce((s, o) => s + Number(o.price), 0);
     }
 
     res.json({ success: true, data: rows });
