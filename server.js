@@ -20,4 +20,20 @@ app.use('/api/webhook',     require('./routes/webhook'));
 app.get('/', (req, res) => res.json({ message: 'Medical Booking API is running' }));
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`✅ Server chạy tại http://localhost:${PORT}`));
+app.listen(PORT, () => {
+  console.log(`✅ Server chạy tại http://localhost:${PORT}`);
+
+  // Keep-alive: tự ping mỗi 25 phút để Railway không sleep
+  const SELF_URL = process.env.RAILWAY_PUBLIC_DOMAIN
+    ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
+    : `http://localhost:${PORT}`;
+
+  setInterval(async () => {
+    try {
+      await fetch(SELF_URL);
+      console.log('🏓 Keep-alive ping OK');
+    } catch (e) {
+      console.log('🏓 Keep-alive ping failed:', e.message);
+    }
+  }, 25 * 60 * 1000);
+});
