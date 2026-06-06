@@ -76,19 +76,14 @@ router.post('/appointments/:id/record', async (req, res) => {
     const [[existing]] = await db.query(
       'SELECT id FROM medical_records WHERE appointment_id=?', [req.params.id]);
 
-    let recordId;
     if (existing) {
-      await db.query(
-        'UPDATE medical_records SET diagnosis=?, notes=? WHERE id=?',
-        [diagnosis, notes, existing.id]);
-      recordId = existing.id;
-      await db.query('DELETE FROM prescription_items WHERE medical_record_id=?', [recordId]);
-    } else {
-      const [result] = await db.query(
-        'INSERT INTO medical_records (appointment_id, diagnosis, notes) VALUES (?,?,?)',
-        [req.params.id, diagnosis, notes]);
-      recordId = result.insertId;
+      return res.json({ success: false, message: 'Bệnh án đã được lập, không thể chỉnh sửa.' });
     }
+
+    const [result] = await db.query(
+      'INSERT INTO medical_records (appointment_id, diagnosis, notes) VALUES (?,?,?)',
+      [req.params.id, diagnosis, notes]);
+    const recordId = result.insertId;
 
     if (medicines && medicines.length > 0) {
       for (const m of medicines) {
