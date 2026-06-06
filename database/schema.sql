@@ -76,7 +76,7 @@ CREATE TABLE IF NOT EXISTS appointments (
   schedule_id    INT NOT NULL,
   profile_id     INT NOT NULL,
   queue_number   INT NOT NULL,
-  status         ENUM('waiting','in_progress','done','cancelled') DEFAULT 'waiting',
+  status         ENUM('waiting','in_progress','pending_test','done','cancelled','absent') DEFAULT 'waiting',
   patient_notes  TEXT,
   payment_method VARCHAR(50) DEFAULT 'cash',
   created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
