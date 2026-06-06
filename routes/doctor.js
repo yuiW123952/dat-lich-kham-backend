@@ -35,7 +35,7 @@ router.get('/queue', async (req, res) => {
       JOIN patient_profiles pp ON a.profile_id = pp.id
       JOIN schedules s ON a.schedule_id = s.id
       LEFT JOIN medical_records mr ON mr.appointment_id = a.id
-      WHERE s.doctor_id = ? AND s.date = ? AND a.status IN ('waiting', 'in_progress', 'absent', 'done')
+      WHERE s.doctor_id = ? AND s.date = ? AND a.status IN ('waiting', 'in_progress', 'pending_test', 'absent', 'done')
       ORDER BY a.queue_number ASC`, [doc.id, date]);
     res.json({ success: true, data: rows });
   } catch (e) { res.json({ success: false, message: 'Lỗi server' }); }
@@ -53,6 +53,14 @@ router.put('/appointments/:id/call', async (req, res) => {
 router.put('/appointments/:id/absent', async (req, res) => {
   try {
     await db.query(`UPDATE appointments SET status='absent' WHERE id=?`, [req.params.id]);
+    res.json({ success: true });
+  } catch (e) { res.json({ success: false, message: 'Lỗi server' }); }
+});
+
+// PUT /api/doctor/appointments/:id/mark-testing — chuyển sang chờ xét nghiệm
+router.put('/appointments/:id/mark-testing', async (req, res) => {
+  try {
+    await db.query(`UPDATE appointments SET status='pending_test' WHERE id=?`, [req.params.id]);
     res.json({ success: true });
   } catch (e) { res.json({ success: false, message: 'Lỗi server' }); }
 });
