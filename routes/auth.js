@@ -35,7 +35,7 @@ router.post('/login', async (req, res) => {
     if (!ok) return res.json({ success: false, message: 'Mật khẩu không đúng' });
     const token = jwt.sign({ id: user.id, role: user.role }, process.env.JWT_SECRET, { expiresIn: '7d' });
     res.json({ success: true, data: { token, user: { id: user.id, phone: user.phone, full_name: user.full_name, role: user.role } } });
-  } catch (e) { res.json({ success: false, message: 'Lỗi server' }); }
+  } catch (e) { console.error('LOGIN ERROR:', e); res.json({ success: false, message: 'Lỗi server' }); }
 });
 
 // Lưu OTP tạm thời
