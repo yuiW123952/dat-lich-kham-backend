@@ -257,6 +257,7 @@ router.put('/:id/cancel', async (req, res) => {
     if (!rows.length) return res.json({ success: false, message: 'Không tìm thấy lịch hẹn' });
     if (rows[0].status === 'cancelled') return res.json({ success: false, message: 'Lịch đã được hủy trước đó' });
     if (rows[0].status === 'done') return res.json({ success: false, message: 'Lịch đã khám xong, không thể hủy' });
+    if (rows[0].status === 'cancelled') return res.json({ success: false, message: 'Lịch đã được hủy trước đó' });
     if (Number(rows[0].checked_in) === 1) return res.json({ success: false, message: 'Đã check-in tại lễ tân, không thể hủy!' });
 
     const apptDate = new Date(rows[0].date);
