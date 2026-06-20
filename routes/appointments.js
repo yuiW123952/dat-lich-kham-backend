@@ -2,6 +2,7 @@ const express = require('express');
 const router  = express.Router();
 const db      = require('../config/db');
 const auth    = require('../middleware/auth');
+const { sendPush } = require('../push');
 
 router.use(auth);
 
@@ -234,6 +235,24 @@ router.put('/:id/checkin', async (req, res) => {
       // Chỉ check-in (đã TT online rồi)
       await db.query(`UPDATE appointments SET checked_in=1, checked_in_at=NOW(), status='waiting' WHERE id=?`, [req.params.id]);
     }
+
+    // Lấy push token + số thứ tự để báo cho bệnh nhân đã check-in thành công
+    const [[info]] = await db.query(`
+      SELECT u.expo_push_token, a.queue_number
+      FROM appointments a
+      JOIN patient_profiles pp ON a.profile_id = pp.id
+      JOIN users u ON pp.user_id = u.id
+      WHERE a.id = ?`, [req.params.id]);
+
+    if (info && info.expo_push_token) {
+      sendPush(
+        info.expo_push_token,
+        'Check-in thành công',
+        `Số thứ tự của bạn là ${info.queue_number}. Vui lòng chờ tới lượt khám.`,
+        { type: 'checkin', appointment_id: req.params.id }
+      );
+    }
+
     res.json({ success: true });
   } catch (e) { res.json({ success: false, message: 'Lỗi server' }); }
 });
