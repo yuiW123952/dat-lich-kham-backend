@@ -17,4 +17,4 @@ async function sendPush(expoPushToken, title, body, data = {}) {
   }
 }
 
-module.exports = { sendPush };
+module.exports = { sendPush }; 
