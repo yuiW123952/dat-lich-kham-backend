@@ -2,6 +2,7 @@ const express = require('express');
 const router  = express.Router();
 const db      = require('../config/db');
 const auth    = require('../middleware/auth');
+const { sendPush } = require('../push');
 
 router.use(auth);
 
@@ -45,6 +46,24 @@ router.get('/queue', async (req, res) => {
 router.put('/appointments/:id/call', async (req, res) => {
   try {
     await db.query(`UPDATE appointments SET status='in_progress' WHERE id=?`, [req.params.id]);
+
+    // Lấy push token + số thứ tự để gửi thông báo cho bệnh nhân
+    const [[info]] = await db.query(`
+      SELECT u.expo_push_token, a.queue_number
+      FROM appointments a
+      JOIN patient_profiles pp ON a.profile_id = pp.id
+      JOIN users u ON pp.user_id = u.id
+      WHERE a.id = ?`, [req.params.id]);
+
+    if (info && info.expo_push_token) {
+      sendPush(
+        info.expo_push_token,
+        'Đến lượt khám của bạn',
+        `Số thứ tự ${info.queue_number} - Vui lòng vào phòng khám ngay.`,
+        { type: 'queue_call', appointment_id: req.params.id }
+      );
+    }
+
     res.json({ success: true });
   } catch (e) { res.json({ success: false, message: 'Lỗi server' }); }
 });
