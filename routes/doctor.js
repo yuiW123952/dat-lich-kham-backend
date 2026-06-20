@@ -2,7 +2,7 @@ const express = require('express');
 const router  = express.Router();
 const db      = require('../config/db');
 const auth    = require('../middleware/auth');
-const { sendPush } = require('../push');
+const { sendPush } = require('../helpers/push');
 
 router.use(auth);
 
