@@ -32,8 +32,11 @@ router.post('/sepay', async (req, res) => {
     } else if (dlMatch) {
       const appointmentId = parseInt(dlMatch[1]);
       console.log(`✅ Đặt lịch appointment_id=${appointmentId}`);
+      // Chỉ xác nhận đã thanh toán — KHÔNG tự động check-in.
+      // Bệnh nhân vẫn phải đưa mã QR cho lễ tân quét tại quầy để check-in,
+      // dù đã chuyển khoản online hay chưa.
       await db.query(`
-        UPDATE appointments SET payment_status='paid', checked_in=1, checked_in_at=NOW(), status='waiting'
+        UPDATE appointments SET payment_status='paid'
         WHERE id=? AND payment_status!='paid'
       `, [appointmentId]);
     } else {
